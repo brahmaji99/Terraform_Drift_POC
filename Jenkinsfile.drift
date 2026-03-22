@@ -11,8 +11,8 @@ pipeline {
     }
 
     environment {
-        AWS_DEFAULT_REGION = 'ap-southeast-2'  // Region where Bedrock model/profile exists
-        BEDROCK_MODEL_ID = 'arn:aws:bedrock:us-east-1:123456789012:inference-profile/claude-sonnet-4-6-profile'
+        AWS_DEFAULT_REGION = 'ap-southeast-2'  // must match EC2/Bedrock region
+        BEDROCK_MODEL_ID = 'arn:aws:bedrock:ap-southeast-2:671590543400:inference-profile/apac.anthropic.claude-sonnet-4-20250514-v1:0'
     }
 
     stages {
