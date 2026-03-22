@@ -2,11 +2,15 @@ pipeline {
     agent any
 
     triggers {
-        cron('H/15 * * * *')
+        cron('H/15 * * * *') // Runs every 15 minutes
     }
 
     parameters {
-        choice(name: 'ENV', choices: ['dev','stage','prod'])
+        choice(name: 'ENV', choices: ['dev', 'stage', 'prod'], description: 'Environment')
+    }
+
+    environment {
+        AWS_DEFAULT_REGION = 'ap-southeast-2'
     }
 
     stages {
@@ -21,17 +25,50 @@ pipeline {
         stage('Drift Detection') {
             steps {
                 script {
+                    // Run your drift detection script and capture exit code
                     def status = sh(
                         script: "bash scripts/drift_detect.sh ${params.ENV}",
                         returnStatus: true
                     )
 
                     if (status == 2) {
-                        sh "python3 scripts/analyze_risk.py reports/drift/${params.ENV}.json"
-                        sh "bash scripts/notify.sh ${params.ENV}"
+                        echo "Drift detected. Running risk analysis..."
+
+                        // Run risk analysis using Python with AWS region
+                        withEnv(["AWS_DEFAULT_REGION=${env.AWS_DEFAULT_REGION}"]) {
+                            def riskStatus = sh(
+                                script: "python3 scripts/analyze_risk.py reports/drift/${params.ENV}.json",
+                                returnStatus: true
+                            )
+
+                            echo "Risk analysis exit code: ${riskStatus}"
+
+                            // Send notification only for MEDIUM or HIGH
+                            if (riskStatus >= 1) {
+                                sh "bash scripts/notify.sh ${params.ENV}"
+                            }
+
+                            // Fail pipeline for HIGH risk (optional)
+                            if (riskStatus == 2) {
+                                error "HIGH risk detected. Pipeline stopped."
+                            }
+                        }
+                    } else if (status == 0) {
+                        echo "No drift detected."
+                    } else {
+                        error "Drift detection script failed."
                     }
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            echo "Drift pipeline completed successfully"
+        }
+        failure {
+            echo "Drift pipeline failed"
         }
     }
 }
