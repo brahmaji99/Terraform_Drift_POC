@@ -47,12 +47,15 @@ pipeline {
             steps {
                 dir("environments/${params.ENV}") {
                     script {
+                        // Run terraform plan and capture exit code
                         def exitCode = sh(
                             script: 'terraform plan -detailed-exitcode -out=tfplan; echo $?',
                             returnStdout: true
                         ).trim()
 
                         echo "Terraform exit code: ${exitCode}"
+
+                        // Save to file for Drift Detection stage
                         writeFile file: 'exitcode', text: exitCode
                     }
                 }
@@ -76,7 +79,6 @@ pipeline {
                 }
             }
         }
-
         stage('Manual Approval') {
             when {
                 expression { params.APPLY == true }
