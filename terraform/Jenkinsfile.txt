@@ -1,0 +1,98 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'ENV', choices: ['dev', 'stage', 'prod'], description: 'Environment')
+        booleanParam(name: 'APPLY', defaultValue: false, description: 'Apply changes?')
+    }
+
+    environment {
+        AWS_DEFAULT_REGION = 'ap-southeast-2'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git 'https://github.com/YOUR_USERNAME/YOUR_REPO.git'
+            }
+        }
+
+        stage('Init') {
+            steps {
+                dir("environments/${params.ENV}") {
+                    sh 'terraform init'
+                }
+            }
+        }
+
+        stage('Validate') {
+            steps {
+                dir("environments/${params.ENV}") {
+                    sh 'terraform validate'
+                }
+            }
+        }
+
+        stage('Format Check') {
+            steps {
+                dir("environments/${params.ENV}") {
+                    sh 'terraform fmt -check'
+                }
+            }
+        }
+
+        stage('Plan') {
+            steps {
+                dir("environments/${params.ENV}") {
+                    sh 'terraform plan -detailed-exitcode -out=tfplan || exit_code=$?; echo $exit_code > exitcode'
+                }
+            }
+        }
+
+        stage('Drift Detection') {
+            steps {
+                script {
+                    def exitCode = sh(script: "cat environments/${params.ENV}/exitcode", returnStdout: true).trim()
+
+                    if (exitCode == "2") {
+                        echo "Drift detected!"
+                    } else if (exitCode == "0") {
+                        echo "No changes"
+                    } else {
+                        error "Terraform plan failed"
+                    }
+                }
+            }
+        }
+
+        stage('Manual Approval') {
+            when {
+                expression { params.APPLY == true }
+            }
+            steps {
+                input message: "Approve apply for ${params.ENV}?"
+            }
+        }
+
+        stage('Apply') {
+            when {
+                expression { params.APPLY == true }
+            }
+            steps {
+                dir("environments/${params.ENV}") {
+                    sh 'terraform apply -auto-approve tfplan'
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline completed successfully"
+        }
+        failure {
+            echo "Pipeline failed"
+        }
+    }
+}

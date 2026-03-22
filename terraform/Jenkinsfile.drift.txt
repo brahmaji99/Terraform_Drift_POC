@@ -1,0 +1,36 @@
+pipeline {
+    agent any
+
+    triggers {
+        cron('H/15 * * * *')
+    }
+
+    parameters {
+        choice(name: 'ENV', choices: ['dev','stage','prod'])
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git 'https://github.com/YOUR_USERNAME/YOUR_REPO.git'
+            }
+        }
+
+        stage('Drift Detection') {
+            steps {
+                script {
+                    def status = sh(
+                        script: "bash scripts/drift_detect.sh ${params.ENV}",
+                        returnStatus: true
+                    )
+
+                    if (status == 2) {
+                        sh "python3 scripts/analyze_risk.py reports/drift/${params.ENV}.json"
+                        sh "bash scripts/notify.sh ${params.ENV}"
+                    }
+                }
+            }
+        }
+    }
+}
