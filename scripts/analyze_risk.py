@@ -4,7 +4,7 @@ import boto3
 import sys
 
 # Get region and Bedrock model/profile from environment
-region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+region = os.environ.get('AWS_DEFAULT_REGION', 'ap-southeast-2')
 model_id_or_profile = os.environ.get(
     'BEDROCK_MODEL_ID',
     'anthropic.claude-v2'  # fallback if not set
@@ -13,16 +13,21 @@ model_id_or_profile = os.environ.get(
 # Initialize Bedrock client
 client = boto3.client('bedrock-runtime', region_name=region)
 
-# Load drift JSON file
+# Validate input
 if len(sys.argv) < 2:
     print("Usage: python3 analyze_risk.py <drift_json_file>")
     sys.exit(1)
 
 file = sys.argv[1]
-with open(file) as f:
-    data = json.load(f)
 
-# Construct prompt for risk classification
+try:
+    with open(file) as f:
+        data = json.load(f)
+except Exception as e:
+    print(f"Error reading file: {e}")
+    sys.exit(1)
+
+# Construct prompt
 prompt = f"""
 Classify Terraform risk:
 
@@ -37,19 +42,25 @@ MEDIUM:
 LOW:
 - tags
 
-Return ONLY LOW, MEDIUM, HIGH
+Return ONLY one word: LOW or MEDIUM or HIGH
 
 DATA:
 {json.dumps(data)[:4000]}
 """
 
-# Attempt to invoke model
+# Call Bedrock using correct format (IMPORTANT FIX)
 try:
     response = client.invoke_model(
         modelId=model_id_or_profile,
         body=json.dumps({
-            "prompt": prompt,
-            "max_tokens_to_sample": 50
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 100,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
         })
     )
 except client.exceptions.ValidationException as e:
@@ -59,15 +70,31 @@ except Exception as e:
     print(f"Bedrock API error: {e}")
     sys.exit(1)
 
-# Parse and print output
-result = json.loads(response['body'].read())
-output = result.get("completion", "").strip()
+# Parse response safely
+try:
+    result = json.loads(response['body'].read())
+
+    if "content" in result and len(result["content"]) > 0:
+        output = result["content"][0]["text"].strip()
+    else:
+        output = str(result).strip()
+
+except Exception as e:
+    print(f"Error parsing Bedrock response: {e}")
+    sys.exit(1)
+
 print(f"Bedrock output: {output}")
 
+# Normalize output
+output_upper = output.upper()
+
 # Exit codes for Jenkins
-if "LOW" in output:
+if "LOW" in output_upper:
     sys.exit(0)
-elif "MEDIUM" in output:
+elif "MEDIUM" in output_upper:
     sys.exit(1)
-else:  # HIGH or unknown
+elif "HIGH" in output_upper:
     sys.exit(2)
+else:
+    print("Unexpected response from model")
+    sys.exit(1)
