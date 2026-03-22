@@ -14,7 +14,8 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git 'https://github.com/brahmaji99/Terraform_Drift_POC.git'
+                // Checkout the 'main' branch of the public GitHub repo
+                git branch: 'main', url: 'https://github.com/brahmaji99/Terraform_Drift_POC.git'
             }
         }
 
