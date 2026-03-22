@@ -46,22 +46,32 @@ pipeline {
         stage('Plan') {
             steps {
                 dir("environments/${params.ENV}") {
-                    sh 'terraform plan -detailed-exitcode -out=tfplan || exit_code=$?; echo $exit_code > exitcode'
+                    script {
+                        def exitCode = sh(
+                            script: 'terraform plan -detailed-exitcode -out=tfplan; echo $?',
+                            returnStdout: true
+                        ).trim()
+
+                        echo "Terraform exit code: ${exitCode}"
+                        writeFile file: 'exitcode', text: exitCode
+                    }
                 }
             }
         }
 
         stage('Drift Detection') {
             steps {
-                script {
-                    def exitCode = sh(script: "cat environments/${params.ENV}/exitcode", returnStdout: true).trim()
+                dir("environments/${params.ENV}") {
+                    script {
+                        def exitCode = readFile('exitcode').trim()
 
-                    if (exitCode == "2") {
-                        echo "Drift detected!"
-                    } else if (exitCode == "0") {
-                        echo "No changes"
-                    } else {
-                        error "Terraform plan failed"
+                        if (exitCode == "2") {
+                            echo "Drift detected!"
+                        } else if (exitCode == "0") {
+                            echo "No changes"
+                        } else {
+                            error "Terraform plan failed"
+                        }
                     }
                 }
             }
