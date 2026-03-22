@@ -73,10 +73,19 @@ pipeline {
 
     post {
         success {
-            echo "Drift pipeline for ${params.ENV} completed successfully."
+            emailext(
+                subject: "✅ Drift Pipeline Success - ${params.ENV}",
+                body: "No critical drift detected in ${params.ENV}.",
+                to: "brahma.scm9@gmail.com"
+            )
         }
+
         failure {
-            echo "Drift pipeline for ${params.ENV} failed."
+            emailext(
+                subject: "🚨 Drift Pipeline FAILED - ${params.ENV}",
+                body: "High risk drift detected or pipeline failed.",
+                to: "brahma.scm9@gmail.com"
+            )
         }
     }
 }
