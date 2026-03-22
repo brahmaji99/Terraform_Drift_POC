@@ -1,16 +1,18 @@
 pipeline {
     agent any
 
-    triggers {
-        cron('H/15 * * * *') // runs every 15 minutes
-    }
+    // Uncomment if you want scheduled runs
+    // triggers {
+    //     cron('H/15 * * * *') // runs every 15 minutes
+    // }
 
     parameters {
         choice(name: 'ENV', choices: ['dev', 'stage', 'prod'], description: 'Environment')
     }
 
     environment {
-        AWS_DEFAULT_REGION = 'ap-southeast-2'
+        AWS_DEFAULT_REGION = 'ap-southeast-2'  // Region where Bedrock model/profile exists
+        BEDROCK_MODEL_ID = 'arn:aws:bedrock:us-east-1:123456789012:inference-profile/claude-sonnet-4-6-profile'
     }
 
     stages {
@@ -25,17 +27,21 @@ pipeline {
         stage('Drift Detection') {
             steps {
                 script {
-                    echo "Running drift detection..."
+                    echo "Running Terraform drift detection..."
+                    // Run drift detection script; returns 2 if drift, 0 if no drift
                     def driftStatus = sh(
                         script: "bash scripts/drift_detect.sh ${params.ENV}",
                         returnStatus: true
                     )
 
                     if (driftStatus == 2) {
-                        echo "Drift detected. Running risk analysis..."
+                        echo "Drift detected in ${params.ENV}. Running Bedrock risk analysis..."
 
-                        // Run Python risk analysis with AWS region
-                        def riskStatus = withEnv(["AWS_DEFAULT_REGION=${env.AWS_DEFAULT_REGION}"]) {
+                        // Run Python risk analysis with AWS Bedrock
+                        def riskStatus = withEnv([
+                            "AWS_DEFAULT_REGION=${env.AWS_DEFAULT_REGION}",
+                            "BEDROCK_MODEL_ID=${env.BEDROCK_MODEL_ID}"
+                        ]) {
                             sh(
                                 script: "python3 scripts/analyze_risk.py reports/drift/${params.ENV}.json",
                                 returnStatus: true
@@ -44,13 +50,13 @@ pipeline {
 
                         echo "Risk analysis exit code: ${riskStatus}"
 
-                        // Send notifications only for MEDIUM or HIGH risk
+                        // Send notifications for MEDIUM or HIGH risk
                         if (riskStatus >= 1) {
                             echo "Sending notification for ${params.ENV} environment..."
                             sh "bash scripts/notify.sh ${params.ENV}"
                         }
 
-                        // Optionally fail pipeline for HIGH risk
+                        // Stop pipeline if HIGH risk detected
                         if (riskStatus == 2) {
                             error "HIGH risk detected for ${params.ENV}. Pipeline stopped."
                         }
