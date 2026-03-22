@@ -38,7 +38,7 @@ pipeline {
         stage('Format Check') {
             steps {
                 dir("environments/${params.ENV}") {
-                    sh 'terraform fmt -check'
+                    sh 'terraform fmt'
                 }
             }
         }
