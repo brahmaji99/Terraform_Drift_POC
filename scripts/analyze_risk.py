@@ -1,13 +1,16 @@
 import json
 import boto3
 import sys
+import os  # <--- added
+
+# Use AWS_DEFAULT_REGION from environment or default
+region = os.environ.get('AWS_DEFAULT_REGION', 'ap-southeast-2')
+client = boto3.client('bedrock-runtime', region_name=region)
 
 file = sys.argv[1]
 
 with open(file) as f:
     data = json.load(f)
-
-client = boto3.client('bedrock-runtime')
 
 prompt = f"""
 Classify Terraform risk:
