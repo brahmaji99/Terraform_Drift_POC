@@ -33,7 +33,7 @@ DATA:
 """
 
 response = client.invoke_model(
-    modelId='anthropic.claude-v2-2023-12-06',
+    modelId='anthropic.claude-sonnet-4-6',
     body=json.dumps({
         "prompt": prompt,
         "max_tokens_to_sample": 50
