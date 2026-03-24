@@ -8,6 +8,7 @@ pipeline {
 
     parameters {
         choice(name: 'ENV', choices: ['dev', 'stage', 'prod'], description: 'Environment')
+        string(name: 'EMAIL_TO', defaultValue: 'brahma.scm9@gmail.com', description: 'Email recipients')
     }
 
     environment {
@@ -74,19 +75,18 @@ pipeline {
     post {
         always {
             script {
-                // Helper function for safe JSON parsing (NonCPS avoids serialization issues)
-                @NonCPS
-                def parseJsonFile(String path) {
-                    if (!fileExists(path)) return []
-                    return new groovy.json.JsonSlurper().parseText(readFile(path))
+                def reportFile = "reports/risk/${params.ENV}.json"
+
+                // Inline JSON parsing (safe in Declarative Pipeline)
+                def reportRaw = []
+                if (fileExists(reportFile)) {
+                    reportRaw = new groovy.json.JsonSlurper().parseText(readFile(reportFile))
                 }
 
-                def reportFile = "reports/risk/${params.ENV}.json"
-                def rawReport = parseJsonFile(reportFile)
+                // Convert Map -> List if needed
+                def report = reportRaw instanceof Map ? reportRaw.values() : reportRaw
 
-                // Convert Map -> List if JSON is in map form
-                def report = rawReport instanceof Map ? rawReport.values() : rawReport
-
+                // Define severities
                 def severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
                 def emailBody = ""
 
