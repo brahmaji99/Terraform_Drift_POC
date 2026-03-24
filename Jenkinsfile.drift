@@ -74,59 +74,56 @@ pipeline {
     post {
         always {
             script {
-                def reportFile = "reports/risk/${params.ENV}.json"
-                def reportExists = fileExists(reportFile)
-
-                def riskSummary = []
-                def emailBody = ""
-
-                if (reportExists) {
-                    def reportRaw = new groovy.json.JsonSlurper().parseText(readFile(reportFile))
-                    def report = reportRaw instanceof Map ? reportRaw.values() : reportRaw
-
-                    def severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
-
-                    severities.each { sev ->
-                        def items = report.findAll { it?.severity?.toUpperCase() == sev }
-
-                        if (items && items.size() > 0) {
-                            emailBody += "<h3>${sev} Issues (${items.size()})</h3><ul>"
-
-                            items.each { item ->
-                                emailBody += """
-                                    <li>
-                                        <b>Resource:</b> ${item?.resource ?: "N/A"} <br/>
-                                        <b>Reason:</b> ${item?.reason ?: "N/A"} <br/>
-                                        <b>Impact:</b> ${item?.impact ?: "N/A"} <br/>
-                                        <b>Recommendation:</b> ${item?.recommendation ?: "N/A"}
-                                    </li><br/>
-                                """
-                            }
-
-                            emailBody += "</ul>"
-                        }
-                    }
-
-                    // If no issues found
-                    if (emailBody == "") {
-                        emailBody = "<h3>No risks detected ✅</h3>"
-                    }
-
-                } else {
-                    emailBody = "<h3>Risk report not found ❌</h3>"
+                // Helper function for safe JSON parsing (NonCPS avoids serialization issues)
+                @NonCPS
+                def parseJsonFile(String path) {
+                    if (!fileExists(path)) return []
+                    return new groovy.json.JsonSlurper().parseText(readFile(path))
                 }
 
-                // Send Email
+                def reportFile = "reports/risk/${params.ENV}.json"
+                def rawReport = parseJsonFile(reportFile)
+
+                // Convert Map -> List if JSON is in map form
+                def report = rawReport instanceof Map ? rawReport.values() : rawReport
+
+                def severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+                def emailBody = ""
+
+                severities.each { sev ->
+                    def items = report.findAll { it?.severity?.toUpperCase() == sev }
+                    if (items && items.size() > 0) {
+                        emailBody += "<h3>${sev} Issues (${items.size()})</h3><ul>"
+                        items.each { item ->
+                            emailBody += """
+                            <li>
+                                <b>Resource:</b> ${item?.resource ?: "N/A"} <br/>
+                                <b>Reason:</b> ${item?.reason ?: "N/A"} <br/>
+                                <b>Impact:</b> ${item?.impact ?: "N/A"} <br/>
+                                <b>Recommendation:</b> ${item?.recommendation ?: "N/A"}
+                            </li><br/>
+                            """
+                        }
+                        emailBody += "</ul>"
+                    }
+                }
+
+                // If no issues detected
+                if (emailBody == "") {
+                    emailBody = "<h3>No risks detected ✅</h3>"
+                }
+
+                // Send HTML email
                 emailext(
                     subject: "Terraform Drift Report - ${params.ENV}",
                     body: """
-                        <html>
-                            <body>
-                                <h2>Terraform Drift Analysis Report</h2>
-                                <p><b>Environment:</b> ${params.ENV}</p>
-                                ${emailBody}
-                            </body>
-                        </html>
+                    <html>
+                        <body>
+                            <h2>Terraform Drift Analysis Report</h2>
+                            <p><b>Environment:</b> ${params.ENV}</p>
+                            ${emailBody}
+                        </body>
+                    </html>
                     """,
                     mimeType: 'text/html',
                     to: "${params.EMAIL_TO}"
