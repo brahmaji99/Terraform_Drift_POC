@@ -81,13 +81,13 @@ pipeline {
                 def emailBody = ""
 
                 if (reportExists) {
-                    def report = readJSON file: reportFile
+                    def reportRaw = new groovy.json.JsonSlurper().parseText(readFile(reportFile))
+                    def report = reportRaw instanceof Map ? reportRaw.values() : reportRaw
 
-                    // Handle all severities including LOW
                     def severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 
                     severities.each { sev ->
-                        def items = report.findAll { it.severity?.toUpperCase() == sev }
+                        def items = report.findAll { it?.severity?.toUpperCase() == sev }
 
                         if (items && items.size() > 0) {
                             emailBody += "<h3>${sev} Issues (${items.size()})</h3><ul>"
@@ -95,10 +95,10 @@ pipeline {
                             items.each { item ->
                                 emailBody += """
                                     <li>
-                                        <b>Resource:</b> ${item.resource ?: "N/A"} <br/>
-                                        <b>Reason:</b> ${item.reason ?: "N/A"} <br/>
-                                        <b>Impact:</b> ${item.impact ?: "N/A"} <br/>
-                                        <b>Recommendation:</b> ${item.recommendation ?: "N/A"}
+                                        <b>Resource:</b> ${item?.resource ?: "N/A"} <br/>
+                                        <b>Reason:</b> ${item?.reason ?: "N/A"} <br/>
+                                        <b>Impact:</b> ${item?.impact ?: "N/A"} <br/>
+                                        <b>Recommendation:</b> ${item?.recommendation ?: "N/A"}
                                     </li><br/>
                                 """
                             }
