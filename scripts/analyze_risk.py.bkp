@@ -2,9 +2,8 @@ import os
 import json
 import boto3
 import sys
-import re
 
-# ---------------- CONFIG ----------------
+# Config
 region = os.environ.get('AWS_DEFAULT_REGION', 'ap-southeast-2')
 model_id_or_profile = os.environ.get(
     'BEDROCK_MODEL_ID',
@@ -13,7 +12,7 @@ model_id_or_profile = os.environ.get(
 
 client = boto3.client('bedrock-runtime', region_name=region)
 
-# ---------------- INPUT ----------------
+# Validate input
 if len(sys.argv) < 2:
     print("Usage: python3 analyze_risk.py <drift_json_file>")
     sys.exit(1)
@@ -27,15 +26,13 @@ except Exception as e:
     print(f"Error reading file: {e}")
     sys.exit(1)
 
-# ---------------- PROMPT ----------------
+# Enhanced prompt (AI explanation + fix)
 prompt = f"""
 You are a senior cloud security engineer.
 
-Analyze Terraform drift data and return structured JSON.
+Analyze the Terraform drift data and return structured JSON.
 
-Return ONLY raw JSON. Do NOT include markdown, backticks, or explanation.
-
-Format:
+Return ONLY valid JSON in this format:
 {{
   "risk": "LOW | MEDIUM | HIGH",
   "reason": "why this drift happened",
@@ -60,7 +57,7 @@ DATA:
 {json.dumps(data)[:4000]}
 """
 
-# ---------------- CALL BEDROCK ----------------
+# Call Bedrock
 try:
     response = client.invoke_model(
         modelId=model_id_or_profile,
@@ -82,7 +79,7 @@ except Exception as e:
     print(f"Bedrock API error: {e}")
     sys.exit(1)
 
-# ---------------- PARSE RESPONSE ----------------
+# Parse response
 try:
     result = json.loads(response['body'].read())
 
@@ -91,53 +88,25 @@ try:
     else:
         raw_text = str(result)
 
+    # Try parsing AI JSON output
+    try:
+        ai_output = json.loads(raw_text)
+    except:
+        print("⚠️ Failed to parse AI JSON. Raw output:")
+        print(raw_text)
+        sys.exit(1)
+
 except Exception as e:
     print(f"Error parsing Bedrock response: {e}")
     sys.exit(1)
 
-# Debug log (very useful in Jenkins)
-print("\n--- Raw Bedrock Output ---")
-print(raw_text)
-print("--------------------------\n")
-
-# ---------------- CLEAN JSON ----------------
-def clean_ai_output(text):
-    text = text.strip()
-
-    # Remove markdown blocks
-    text = re.sub(r"^```json", "", text)
-    text = re.sub(r"^```", "", text)
-    text = re.sub(r"```$", "", text)
-    text = text.strip()
-
-    # Extract JSON object
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        return match.group(0)
-
-    return text
-
-clean_text = clean_ai_output(raw_text)
-
-# ---------------- SAFE PARSE ----------------
-try:
-    ai_output = json.loads(clean_text)
-except Exception:
-    print("⚠️ Failed to parse AI JSON. Using fallback response.")
-    ai_output = {
-        "risk": "LOW",
-        "reason": "Unable to parse AI response",
-        "impact": "Unknown",
-        "recommendation": "Check Bedrock output format"
-    }
-
-# ---------------- NORMALIZE ----------------
-risk = ai_output.get("risk", "LOW").upper()
+# Extract values
+risk = ai_output.get("risk", "UNKNOWN").upper()
 reason = ai_output.get("reason", "")
 impact = ai_output.get("impact", "")
 recommendation = ai_output.get("recommendation", "")
 
-# ---------------- PRINT (JENKINS LOG) ----------------
+# Print for Jenkins logs
 print("\n===== AI Drift Analysis =====")
 print(f"Risk          : {risk}")
 print(f"Reason        : {reason}")
@@ -145,25 +114,20 @@ print(f"Impact        : {impact}")
 print(f"Recommendation: {recommendation}")
 print("================================\n")
 
-# ---------------- SAVE REPORT ----------------
+# Save report for alerts
 try:
     os.makedirs("reports/risk", exist_ok=True)
     report_file = f"reports/risk/{os.path.basename(file)}"
 
     with open(report_file, "w") as f:
-        json.dump({
-            "risk": risk,
-            "reason": reason,
-            "impact": impact,
-            "recommendation": recommendation
-        }, f, indent=2)
+        json.dump(ai_output, f, indent=2)
 
     print(f"Report saved to {report_file}")
 
 except Exception as e:
     print(f"Error saving report: {e}")
 
-# ---------------- EXIT FOR JENKINS ----------------
+# Exit codes for Jenkins
 if risk == "LOW":
     sys.exit(0)
 elif risk == "MEDIUM":
