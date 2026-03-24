@@ -67,62 +67,95 @@ pipeline {
     post {
         always {
             script {
-                def reportFile = "reports/risk/${params.ENV}.json"
-                def emailBody = ""
+                def envName = params.ENV ?: "dev"
+                def reportFile = "reports/risk/${envName}.json"
+
+                echo "Reading report from: ${reportFile}"
+
+                def risk = "UNKNOWN"
+                def reason = "N/A"
+                def impact = "N/A"
+                def recommendation = "N/A"
 
                 if (fileExists(reportFile)) {
+                    def report = readJSON file: reportFile
 
-                    def severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
-
-                    severities.each { sev ->
-
-                        def count = sh(
-                            script: "jq '[.[] | select(.severity==\"${sev}\")] | length' ${reportFile} 2>/dev/null || echo 0",
-                            returnStdout: true
-                        ).trim()
-
-                        if (count != "0") {
-
-                            emailBody += "<h3>${sev} Issues (${count})</h3><ul>"
-
-                            def details = sh(
-                                script: """
-                                jq -r '.[] | select(.severity=="${sev}") |
-                                "<li><b>Resource:</b> \\(.resource // "N/A")<br/>
-                                 <b>Reason:</b> \\(.reason // "N/A")<br/>
-                                 <b>Impact:</b> \\(.impact // "N/A")<br/>
-                                 <b>Recommendation:</b> \\(.recommendation // "N/A")</li><br/>"'
-                                ${reportFile} 2>/dev/null
-                                """,
-                                returnStdout: true
-                            )
-
-                            emailBody += details
-                            emailBody += "</ul>"
-                        }
-                    }
-
+                    risk = report.risk ?: "UNKNOWN"
+                    reason = report.reason ?: "N/A"
+                    impact = report.impact ?: "N/A"
+                    recommendation = report.recommendation ?: "N/A"
                 } else {
-                    emailBody = "<h3>Risk report not found ❌</h3>"
+                    echo "Report file NOT found!"
                 }
 
-                if (emailBody == "") {
-                    emailBody = "<h3>No risks detected ✅</h3>"
+                // 🎨 Color + Badge
+                def color = "#28a745"   // green default
+                def badge = "✅"
+
+                if (risk == "HIGH") {
+                    color = "#dc3545"   // red
+                    badge = "🔥"
+                } else if (risk == "MEDIUM") {
+                    color = "#ffc107"   // yellow
+                    badge = "⚠️"
                 }
 
+                // 📧 HTML Email Body
+                def emailBody = """
+                <html>
+                <body style="font-family: Arial, sans-serif;">
+
+                    <h2 style="color:${color};">
+                        Terraform Drift Analysis - ${envName} ${badge}
+                    </h2>
+
+                    <table style="border-collapse: collapse; width: 100%;">
+
+                        <tr>
+                            <td style="border:1px solid #ddd; padding:8px;"><b>Environment</b></td>
+                            <td style="border:1px solid #ddd; padding:8px;">${envName}</td>
+                        </tr>
+
+                        <tr>
+                            <td style="border:1px solid #ddd; padding:8px;"><b>Risk Level</b></td>
+                            <td style="border:1px solid #ddd; padding:8px; color:${color}; font-weight:bold;">
+                                ${risk} ${badge}
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td style="border:1px solid #ddd; padding:8px;"><b>Reason</b></td>
+                            <td style="border:1px solid #ddd; padding:8px;">${reason}</td>
+                        </tr>
+
+                        <tr>
+                            <td style="border:1px solid #ddd; padding:8px;"><b>Impact</b></td>
+                            <td style="border:1px solid #ddd; padding:8px;">${impact}</td>
+                        </tr>
+
+                        <tr>
+                            <td style="border:1px solid #ddd; padding:8px;"><b>Recommendation</b></td>
+                            <td style="border:1px solid #ddd; padding:8px;">${recommendation}</td>
+                        </tr>
+
+                    </table>
+
+                    <br/>
+                    <p style="font-size:12px; color:gray;">
+                        This is an automated AI-based Terraform drift risk analysis report.
+                    </p>
+
+                </body>
+                </html>
+                """
+
+                // 📎 Send Email with Attachment
                 emailext(
-                    subject: "Terraform Drift Report - ${params.ENV}",
-                    body: """
-                    <html>
-                        <body>
-                            <h2>Terraform Drift Analysis Report</h2>
-                            <p><b>Environment:</b> ${params.ENV}</p>
-                            ${emailBody}
-                        </body>
-                    </html>
-                    """,
+                    subject: "🚀 Terraform Drift Report - ${envName} - ${risk}",
+                    body: emailBody,
+                    to: "your-email@gmail.com",
                     mimeType: 'text/html',
-                    to: "${params.EMAIL_TO}"
+                    attachmentsPattern: reportFile   // ✅ attach JSON
                 )
             }
         }
