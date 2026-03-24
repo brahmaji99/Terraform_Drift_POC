@@ -1,13 +1,18 @@
 pipeline {
     agent any
 
+    // Uncomment if you want scheduled runs
+    // triggers {
+    //     cron('H/15 * * * *') // runs every 15 minutes
+    // }
+
     parameters {
         choice(name: 'ENV', choices: ['dev', 'stage', 'prod'], description: 'Environment')
         string(name: 'EMAIL_TO', defaultValue: 'brahma.scm9@gmail.com', description: 'Email recipients')
     }
 
     environment {
-        AWS_DEFAULT_REGION = 'ap-southeast-2'
+        AWS_DEFAULT_REGION = 'ap-southeast-2'  // must match EC2/Bedrock region
         BEDROCK_MODEL_ID = 'arn:aws:bedrock:ap-southeast-2:671590543400:inference-profile/apac.anthropic.claude-sonnet-4-20250514-v1:0'
     }
 
@@ -24,7 +29,7 @@ pipeline {
             steps {
                 script {
                     echo "Running Terraform drift detection..."
-
+                    // Run drift detection script; returns 2 if drift, 0 if no drift
                     def driftStatus = sh(
                         script: "bash scripts/drift_detect.sh ${params.ENV}",
                         returnStatus: true
@@ -33,6 +38,7 @@ pipeline {
                     if (driftStatus == 2) {
                         echo "Drift detected in ${params.ENV}. Running Bedrock risk analysis..."
 
+                        // Run Python risk analysis with AWS Bedrock
                         def riskStatus = withEnv([
                             "AWS_DEFAULT_REGION=${env.AWS_DEFAULT_REGION}",
                             "BEDROCK_MODEL_ID=${env.BEDROCK_MODEL_ID}"
@@ -45,11 +51,13 @@ pipeline {
 
                         echo "Risk analysis exit code: ${riskStatus}"
 
+                        // Send notifications for MEDIUM or HIGH risk
                         if (riskStatus >= 1) {
-                            echo "Sending notification..."
+                            echo "Sending notification for ${params.ENV} environment..."
                             sh "bash scripts/notify.sh ${params.ENV}"
                         }
 
+                        // Stop pipeline if HIGH risk detected
                         if (riskStatus == 2) {
                             error "HIGH risk detected for ${params.ENV}. Pipeline stopped."
                         }
@@ -57,7 +65,7 @@ pipeline {
                     } else if (driftStatus == 0) {
                         echo "No drift detected in ${params.ENV}."
                     } else {
-                        error "Drift detection failed with status ${driftStatus}"
+                        error "Drift detection script failed with status ${driftStatus}"
                     }
                 }
             }
@@ -68,48 +76,44 @@ pipeline {
         always {
             script {
                 def reportFile = "reports/risk/${params.ENV}.json"
-                def emailBody = ""
 
+                // Inline JSON parsing (safe in Declarative Pipeline)
+                def reportRaw = []
                 if (fileExists(reportFile)) {
-
-                    def severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
-
-                    severities.each { sev ->
-
-                        def count = sh(
-                            script: "jq '[.[] | select(.severity==\"${sev}\")] | length' ${reportFile} 2>/dev/null || echo 0",
-                            returnStdout: true
-                        ).trim()
-
-                        if (count != "0") {
-
-                            emailBody += "<h3>${sev} Issues (${count})</h3><ul>"
-
-                            def details = sh(
-                                script: """
-                                jq -r '.[] | select(.severity=="${sev}") |
-                                "<li><b>Resource:</b> \\(.resource // "N/A")<br/>
-                                 <b>Reason:</b> \\(.reason // "N/A")<br/>
-                                 <b>Impact:</b> \\(.impact // "N/A")<br/>
-                                 <b>Recommendation:</b> \\(.recommendation // "N/A")</li><br/>"'
-                                ${reportFile} 2>/dev/null
-                                """,
-                                returnStdout: true
-                            )
-
-                            emailBody += details
-                            emailBody += "</ul>"
-                        }
-                    }
-
-                } else {
-                    emailBody = "<h3>Risk report not found ❌</h3>"
+                    reportRaw = new groovy.json.JsonSlurper().parseText(readFile(reportFile))
                 }
 
+                // Convert Map -> List if needed
+                def report = reportRaw instanceof Map ? reportRaw.values() : reportRaw
+
+                // Define severities
+                def severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+                def emailBody = ""
+
+                severities.each { sev ->
+                    def items = report.findAll { it?.severity?.toUpperCase() == sev }
+                    if (items && items.size() > 0) {
+                        emailBody += "<h3>${sev} Issues (${items.size()})</h3><ul>"
+                        items.each { item ->
+                            emailBody += """
+                            <li>
+                                <b>Resource:</b> ${item?.resource ?: "N/A"} <br/>
+                                <b>Reason:</b> ${item?.reason ?: "N/A"} <br/>
+                                <b>Impact:</b> ${item?.impact ?: "N/A"} <br/>
+                                <b>Recommendation:</b> ${item?.recommendation ?: "N/A"}
+                            </li><br/>
+                            """
+                        }
+                        emailBody += "</ul>"
+                    }
+                }
+
+                // If no issues detected
                 if (emailBody == "") {
                     emailBody = "<h3>No risks detected ✅</h3>"
                 }
 
+                // Send HTML email
                 emailext(
                     subject: "Terraform Drift Report - ${params.ENV}",
                     body: """
