@@ -12,6 +12,7 @@ resource "aws_instance" "ec2" {
 # ✅ Security Group (no inline rules)
 resource "aws_security_group" "ec2_sg" {
   name        = "ec2-sg"
+  revoke_rules_on_delete = true
   description = "EC2 security group"
 }
 
